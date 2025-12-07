@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logistique d'Archipel</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+
+    <style>
+        :root {
+            --color-bg-primary: #0f172a;
+            --color-bg-secondary: #1e293b;
+            --color-bg-tertiary: #334155;
+            --color-accent-primary: #0ea5e9;
+            --color-accent-secondary: #10b981;
+            --color-accent-danger: #ef4444;
+            --color-accent-warning: #f59e0b;
+            --color-text-primary: #f1f5f9;
+            --color-text-secondary: #cbd5e1;
+            --color-border: #475569;
+        }
+
+        * {
+            color-scheme: dark;
+        }
+
+        body {
+            background-color: var(--color-bg-primary);
+            color: var(--color-text-primary);
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+
+        #app {
+            background-color: var(--color-bg-primary);
+        }
+
+        .tab-button {
+            @apply px-6 py-3 font-medium text-sm transition-all duration-200;
+        }
+
+        .tab-button.active {
+            border-bottom: 2px solid var(--color-accent-primary);
+            color: var(--color-accent-primary);
+        }
+
+        .tab-button:not(.active) {
+            color: var(--color-text-secondary);
+            border-bottom: 2px solid transparent;
+        }
+
+        .tab-button:hover:not(.active) {
+            color: var(--color-text-primary);
+        }
+
+        .card {
+            background-color: var(--color-bg-secondary);
+            border: 1px solid var(--color-border);
+            border-radius: 0.5rem;
+        }
+
+        .input-field {
+            background-color: var(--color-bg-tertiary);
+            border: 1px solid var(--color-border);
+            color: var(--color-text-primary);
+            border-radius: 0.375rem;
+            padding: 0.5rem 0.75rem;
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: var(--color-accent-primary);
+            box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+        }
+
+        .btn-primary {
+            background-color: var(--color-accent-primary);
+            color: var(--color-bg-primary);
+            padding: 0.5rem 1.5rem;
+            border-radius: 0.375rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary:hover {
+            background-color: #0284c7;
+        }
+
+        .btn-primary:disabled {
+            background-color: var(--color-bg-tertiary);
+            cursor: not-allowed;
+            color: var(--color-text-secondary);
+        }
+
+        .alert-danger {
+            background-color: rgba(239, 68, 68, 0.1);
+            border: 1px solid var(--color-accent-danger);
+            color: #fca5a5;
+            padding: 1rem;
+            border-radius: 0.375rem;
+            margin-bottom: 1rem;
+        }
+
+        .alert-success {
+            background-color: rgba(16, 185, 129, 0.1);
+            border: 1px solid var(--color-accent-secondary);
+            color: #86efac;
+            padding: 1rem;
+            border-radius: 0.375rem;
+            margin-bottom: 1rem;
+        }
+
+        .map-container {
+            height: 500px;
+            border-radius: 0.5rem;
+            overflow: hidden;
+            border: 1px solid var(--color-border);
+        }
+
+        .stat-box {
+            background-color: var(--color-bg-tertiary);
+            padding: 1rem;
+            border-radius: 0.375rem;
+            border-left: 4px solid var(--color-accent-primary);
+        }
+
+        .stat-label {
+            color: var(--color-text-secondary);
+            font-size: 0.875rem;
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-value {
+            color: var(--color-accent-primary);
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        .checkbox-field {
+            appearance: none;
+            width: 1.25rem;
+            height: 1.25rem;
+            border: 1px solid var(--color-border);
+            border-radius: 0.25rem;
+            background-color: var(--color-bg-tertiary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .checkbox-field:checked {
+            background-color: var(--color-accent-primary);
+            border-color: var(--color-accent-primary);
+        }
+
+        .checkbox-field:focus {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.1);
+        }
+
+        .table-row {
+            border-bottom: 1px solid var(--color-border);
+            padding: 1rem 0;
+        }
+
+        .table-row:last-child {
+            border-bottom: none;
+        }
+
+        .loading-spinner {
+            border: 2px solid var(--color-bg-tertiary);
+            border-top: 2px solid var(--color-accent-primary);
+            border-radius: 50%;
+            width: 2rem;
+            height: 2rem;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .segment-chip {
+            display: inline-block;
+            background-color: var(--color-bg-tertiary);
+            border: 1px solid var(--color-border);
+            padding: 0.5rem 1rem;
+            border-radius: 1rem;
+            font-size: 0.875rem;
+            margin-right: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .leaflet-container {
+            background-color: var(--color-bg-tertiary) !important;
+        }
+    </style>
+</head>
+<body class="overflow-x-hidden">
+<div id="app"></div>
+
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<script>
+    const { createApp, ref, reactive, computed, onMounted, watch } = Vue;
+
+    const app = createApp({
+        template: `
+                <div class="min-h-screen" style="background-color: var(--color-bg-primary);">
+                    <!-- Header -->
+                    <header class="border-b" style="border-color: var(--color-border); background-color: var(--color-bg-secondary);">
+                        <div class="px-6 py-4">
+                            <div class="flex items-center gap-3 mb-6">
+                                <div class="w-10 h-10 rounded-lg" style="background: linear-gradient(135deg, #0ea5e9, #10b981); display: flex; align-items: center; justify-content: center;">
+                                    <span class="text-white font-bold text-lg">ALK</span>
+                                </div>
+                                <div>
+                                    <h1 class="text-2xl font-bold" style="color: var(--color-text-secondary);">Logistique d'Archipel - Galapagos</h1>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Tabs -->
+                        <div class="flex border-t" style="border-color: var(--color-border);">
+                            <button
+                                class="tab-button"
+                                :class="{ active: activeTab === 'map' }"
+                                @click="activeTab = 'map'"
+                            >
+                              Carte Tactique
+                            </button>
+                            <button
+                                class="tab-button"
+                                :class="{ active: activeTab === 'planner' }"
+                                @click="activeTab = 'planner'"
+                            >
+                                  Planificateur de Mission
+                            </button>
+                            <button
+                                class="tab-button"
+                                :class="{ active: activeTab === 'inventory' }"
+                                @click="activeTab = 'inventory'"
+                            >
+                                  Stocks & Clients
+                            </button>
+                        </div>
+                    </header>
+
+                    <main class="p-6">
+                        <div v-if="activeTab === 'map'" class="space-y-4">
+                            <div class="flex items-center justify-between mb-4">
+                                <h2 class="text-xl font-bold">Carte Tactique - Galapagos</h2>
+                                <div class="text-sm" style="color: var(--color-text-secondary);">
+                                    <span v-if="mapData.islands" class="mr-4">{{ mapData.islands.length }} îles</span>
+                                    <span v-if="mapData.seaplanes">{{ mapData.seaplanes.length }} hydravions</span>
+                                </div>
+                            </div>
+                            <div class="card p-4">
+                                <div id="map" class="map-container"></div>
+                                <div class="mt-4 grid grid-cols-2 gap-4">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-4 h-4 rounded-full" style="background-color: var(--color-accent-primary);"></div>
+                                        <span style="color: var(--color-text-secondary);">Ports</span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-4 h-4 rounded-full" style="background-color: var(--color-accent-warning);"></div>
+                                        <span style="color: var(--color-text-secondary);">Hydravions</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-if="activeTab === 'planner'" class="space-y-4">
+                            <h2 class="text-xl font-bold">Planificateur de Mission</h2>
+                           <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                                <div class="lg:col-span-1">
+                                    <div class="card p-6 space-y-4">
+                                        <h3 class="text-lg font-semibold mb-4">Configuration</h3>
+                                       <div>
+                                            <label class="block text-sm font-medium mb-2" style="color: var(--color-text-secondary);">Hydravion</label>
+                                            <select v-model="planner.selectedSeaplane" class="input-field w-full">
+                                                <option value="">-- Sélectionner --</option>
+                                                <option v-for="plane in formData.locateSeaplanes" :key="plane.id" :value="plane.id">
+                                                    {{ plane.model }} ({{ plane.id }})
+                                                </option>
+                                            </select>
+                                        </div>
+                                       <div>
+                                            <label class="block text-sm font-medium mb-2" style="color: var(--color-text-secondary);">Clients à Livrer</label>
+                                          <div class="space-y-2 max-h-48 overflow-y-auto p-2" style="background-color: var(--color-bg-tertiary); border-radius: 0.375rem; border: 1px solid var(--color-border);">
+                                            <div v-for="client in formData.clients" :key="client.client_id" class="flex items-center gap-2">
+                                              <input
+                                                  type="checkbox"
+                                                  :id="client.client_id"
+                                                  :value="client.client_id"
+                                                  v-model="planner.selectedClients"
+                                                  class="checkbox-field"
+                                              >
+                                              <label :for="client.client_id" class="text-sm flex-1 cursor-pointer">
+                                                {{ client.name }}
+                                              </label>
+                                            </div>
+                                          </div>
+                                        </div>
+                                       <button
+                                            @click="optimizeRoute"
+                                            :disabled="!planner.selectedSeaplane || planner.selectedClients.length === 0 || planner.loading"
+                                            class="btn-primary w-full flex items-center justify-center gap-2"
+                                        >
+                                            <span v-if="!planner.loading">🚀 Calculer l'Itinéraire</span>
+                                            <span v-else class="loading-spinner"></span>
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div class="lg:col-span-2 space-y-4">
+                                    <div v-if="planner.results" class="space-y-4">
+                                        <div v-if="planner.results.warning" class="alert-danger">
+                                            <strong>⚠️ ALERTE</strong><br>
+                                            {{ planner.results.warning }}
+                                        </div>
+
+                                        <div v-if="planner.results.is_feasible" class="alert-success">
+                                            ✓ Livraison FAISABLE
+                                        </div>
+
+                                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            <div class="stat-box">
+                                                <div class="stat-label">Distance Totale</div>
+                                                <div class="stat-value">{{ planner.results.total_distance_km }} km</div>
+                                            </div>
+                                            <div class="stat-box">
+                                                <div class="stat-label">Carburant Estimé</div>
+                                                <div class="stat-value">{{ planner.results.estimated_fuel_needed }} L</div>
+                                            </div>
+                                            <div class="stat-box">
+                                                <div class="stat-label">Faisabilité</div>
+                                                <div class="stat-value" :style="{ color: planner.results.is_feasible ? 'var(--color-accent-secondary)' : 'var(--color-accent-danger)' }">
+                                                    {{ planner.results.is_feasible ? 'OUI ✓' : 'NON ✗' }}
+                                                </div>
+                                            </div>
+                                        </div>
+                                       <div class="card p-4">
+                                            <h3 class="font-semibold mb-3">Itinéraire Détaillé</h3>
+                                            <div class="space-y-2">
+                                                <div v-for="(segment, idx) in planner.results.segments" :key="idx" class="text-sm p-2" style="background-color: var(--color-bg-tertiary); border-radius: 0.375rem; border-left: 3px solid var(--color-accent-primary);">
+                                                    <strong>{{ idx + 1 }}.</strong> {{ segment.from }} → {{ segment.to }}
+                                                    <span style="color: var(--color-accent-primary);">{{ segment.distance_km }} km</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div v-else class="card p-8 text-center" style="color: var(--color-text-secondary);">
+                                        Sélectionnez un hydravion et des clients, puis calculez l'itinéraire
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                       <div v-if="activeTab === 'inventory'" class="space-y-6">
+                            <h2 class="text-xl font-bold">Stocks & Clients</h2>
+                           <div class="card p-6">
+                                <h3 class="text-lg font-semibold mb-4">Produits en Stock</h3>
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-sm">
+                                        <thead style="border-bottom: 2px solid var(--color-border);">
+                                            <tr style="color: var(--color-text-secondary);">
+                                                <th class="text-left py-3 px-4 font-semibold">Nom</th>
+                                                <th class="text-right py-3 px-4 font-semibold">Stock Total</th>
+                                                <th class="text-right py-3 px-4 font-semibold">Caisses/Unité</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr v-for="product in formData.products" :key="product.name" class="table-row">
+                                                <td class="py-3 px-4">{{ product.name }}</td>
+                                                <td class="py-3 px-4 text-right font-medium" style="color: var(--color-accent-primary);">{{ product.stock_total }} u.</td>
+                                                <td class="py-3 px-4 text-right" style="color: var(--color-text-secondary);">{{ product.crates_per_unit || 'N/A' }}</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <div class="card p-6">
+                                <h3 class="text-lg font-semibold mb-4">Dernières Commandes</h3>
+                                <div v-if="inventory.orders.length > 0" class="space-y-3">
+                                    <div v-for="order in inventory.orders" :key="order.order_id" class="card p-4" style="background-color: var(--color-bg-tertiary);">
+                                        <div class="flex items-start justify-between mb-2">
+                                            <div>
+                                                <h4 class="font-semibold">Commande #{{ order.order_id }}</h4>
+                                                <p class="text-sm" style="color: var(--color-text-secondary);">Client: {{ order.client_id }} | Quantité: {{ order.quantity }}</p>
+                                            </div>
+                                            <span class="px-3 py-1 rounded text-sm font-medium"
+                                                :style="{ backgroundColor: order.status === 'completed' ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)', color: order.status === 'completed' ? '#86efac' : '#fcd34d' }">
+                                                {{ order.status }}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div v-else class="text-center py-8" style="color: var(--color-text-secondary);">
+                                    Aucune commande disponible
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            `,
+
+        setup() {
+            const activeTab = ref('map');
+            const map = ref(null);
+            const mapData = reactive({
+                islands: [],
+                seaplanes: []
+            });
+            const formData = reactive({
+                seaplanes: [],
+                clients: [],
+                products: []
+            });
+            const planner = reactive({
+                selectedSeaplane: '',
+                selectedClients: [],
+                results: null,
+                loading: false
+            });
+            const inventory = reactive({
+                orders: []
+            });
+
+            // CORRECTION URL API: Pas de /graphql à la fin, juste l'hôte
+            const API_URL = 'http://localhost:4000';
+
+            // GraphQL Query Function
+            const graphqlQuery = async (query, variables = {}) => {
+                try {
+                    const response = await fetch(`${API_URL}/`, { // CORRECTION: Root endpoint
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            query,
+                            variables
+                        })
+                    });
+                    const data = await response.json();
+                    if (data.errors) {
+                        console.error('GraphQL Error:', data.errors);
+                        return null;
+                    }
+                    return data.data;
+                } catch (error) {
+                    console.error('API Error:', error);
+                    return null;
+                }
+            };
+
+            // Load Map Data
+            const loadMapData = async () => {
+                const query = `
+                        query InitMap {
+                            islands { name location { lat lon } zones { zone_code name location { lat lon } } }
+                            locateSeaplanes { id status lat lon }
+                        }
+                    `;
+                const data = await graphqlQuery(query);
+                if (data) {
+                    mapData.islands = data.islands || [];
+                    mapData.seaplanes = data.locateSeaplanes || [];
+                }
+            };
+
+            // Load Form Data
+            const loadFormData = async () => {
+                const query = `
+                        query InitForm {
+                            locateSeaplanes { id status lat lon fuel_level timestamp }
+                            clients { client_id name home_port }
+                            products { name stock_total crates_per_unit }
+                            orders { order_id client_id status }
+                        }
+                    `;
+                const data = await graphqlQuery(query);
+                if (data) {
+                    formData.locateSeaplanes = data.locateSeaplanes || [];
+                    formData.clients = data.clients || [];
+                    formData.products = data.products || [];
+                    inventory.orders = data.orders || [];
+                }
+            };
+
+            // Optimize Route
+            const optimizeRoute = async () => {
+                if (!planner.selectedSeaplane || planner.selectedClients.length === 0) return;
+
+                planner.loading = true;
+                const query = `
+                        query Optimize($avion: String!, $base: String!, $clients: [Int]!) {
+                            optimizeDelivery(seaplaneId: $avion, warehouseZoneCode: $base, clientIds: $clients) {
+                                total_distance_km
+                                estimated_fuel_needed
+                                is_feasible
+                                warning
+                                segments { from to distance_km }
+                            }
+                        }
+                    `;
+
+                const variables = {
+                    avion: planner.selectedSeaplane,
+                    base: 'ZONE_SC_PB',
+                    clients: planner.selectedClients.map(id => parseInt(id))
+                };
+
+                const data = await graphqlQuery(query, variables);
+                if (data && data.optimizeDelivery) {
+                    planner.results = data.optimizeDelivery;
+                    drawRouteOnMap();
+                }
+                planner.loading = false;
+            };
+
+            // Initialize Map
+            const initializeMap = () => {
+                if (map.value) {
+                    map.value.remove();
+                }
+
+                map.value = L.map('map').setView([-0.7, -90.5], 8);
+
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors',
+                    maxZoom: 19
+                }).addTo(map.value);
+
+                // Add island markers
+                mapData.islands.forEach(island => {
+                    if(island.location) {
+                        L.circleMarker([island.location.lat, island.location.lon], {
+                            radius: 8,
+                            fillColor: '#0ea5e9',
+                            color: '#0ea5e9',
+                            weight: 2,
+                            opacity: 1,
+                            fillOpacity: 0.7
+                        }).addTo(map.value).bindPopup(`<strong>${island.name}</strong>`);
+                    }
+                });
+
+                // Add seaplane markers
+                mapData.seaplanes.forEach(plane => {
+                    if(plane.lat && plane.lon) {
+                        L.circleMarker([plane.lat, plane.lon], {
+                            radius: 10,
+                            fillColor: '#f59e0b',
+                            color: '#f59e0b',
+                            weight: 2,
+                            opacity: 1,
+                            fillOpacity: 0.8
+                        }).addTo(map.value).bindPopup(`<strong>Hydravion ${plane.id}</strong><br>Status: ${plane.status}`);
+                    }
+                });
+            };
+
+            // Draw route polyline on map
+            const drawRouteOnMap = () => {
+                if (!map.value || !planner.results || !planner.results.segments) return;
+                // Note: Drawing actual routes would require resolving client/island locations
+            };
+
+            // Watch map data changes
+            watch(() => mapData.islands.length, () => {
+                if (activeTab.value === 'map' && mapData.islands.length > 0) {
+                    initializeMap();
+                }
+            });
+
+            // Initialize on mount
+            onMounted(async () => {
+                await loadMapData();
+                await loadFormData();
+                setTimeout(initializeMap, 100); // Small delay to ensure DOM is ready
+            });
+
+            return {
+                activeTab,
+                mapData,
+                formData,
+                planner,
+                inventory,
+                optimizeRoute,
+                initializeMap,
+                drawRouteOnMap
+            };
+        }
+    });
+
+    app.mount('#app');
+</script>
+</body>
+</html>
