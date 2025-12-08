@@ -6,8 +6,9 @@ import neo4j from 'neo4j-driver';
 
 const MONGODB_URI = "mongodb+srv://hdi:test@cluster0.bjbokej.mongodb.net";
 const NEO4J_URI = "neo4j://localhost:7687";
-const driver = neo4j.driver(NEO4J_URI, neo4j.auth.basic('neo4j', 'your_password'));
+const driver = neo4j.driver(NEO4J_URI, neo4j.auth.basic('neo4j', 'password'));
 const AVG_FUEL_CONSUMPTION_L_KM = 0.02;
+
 /**
  *
  *  Schema & model MongoDb Table
@@ -50,7 +51,7 @@ export const Order = mongoose.model('Order', orderSchema, 'orders');
 
 const lockerSchema = new Schema({
     locker_id: { type: Number, required: true, unique: true },
-    port_id: Number,
+    port_id: String,
     is_empty: Boolean,
     occupied_by_order_id: Number
 });
@@ -347,29 +348,16 @@ const resolvers = {
 
             try {
                 const clients = await Client.find({ client_id: { $in: clientIds } });
-                const rawPorts = [...new Set(clients.map(c => c.home_port))];
-                const targetZoneCodes = [];
+                const targetZoneCodes = [...new Set(
+                    clients
+                        .map(c => c.home_port)
+                        .filter(port => port && typeof port === 'string')
+                )];
 
-                for (const portRef of rawPorts) {
-                    if (portRef.startsWith("ZONE")) {
-                        targetZoneCodes.push(portRef);
-                    } else {
-                        const transRes = await session.run(
-                            `MATCH (z:HydroplaneZone) WHERE elementId(z) = $id RETURN z.zone_code as code`,
-                            { id: portRef }
-                        );
+                console.log("Zones à visiter (Codes):", targetZoneCodes);
 
-                        if (transRes.records.length > 0) {
-                            const code = transRes.records[0].get('code');
-                            if(code) targetZoneCodes.push(code);
-                        } else {
-                            console.warn(`⚠️ Impossible de trouver une zone pour l'ID : ${portRef}`);
-                        }
-                    }
-                }
-
-                if (targetZoneCodes.length === 0 && clientIds.length > 0) {
-                    throw new Error("Aucun port valide trouvé pour les clients sélectionnés.");
+                if (targetZoneCodes.length === 0) {
+                    console.warn("Aucun code zone valide trouvé pour les clients sélectionnés.");
                 }
 
                 const orders = await Order.find({
@@ -384,17 +372,21 @@ const resolvers = {
 
                 orders.forEach(order => {
                     order.items.forEach(item => {
-                        totalCratesNeeded += (productCratesMap[item.product_id] * item.qty);
+                        const cratesPerItem = productCratesMap[item.product_id] || 1;
+                        totalCratesNeeded += (cratesPerItem * item.qty);
                     });
                 });
 
                 const fullItinerary = [warehouseZoneCode, ...targetZoneCodes, warehouseZoneCode];
+
+                console.log("Itinéraire complet:", fullItinerary);
+
                 let totalDistance = 0;
                 const segments = [];
 
                 for (let i = 0; i < fullItinerary.length - 1; i++) {
-                    const start = fullItinerary[i];
-                    const end = fullItinerary[i+1];
+                    let start = fullItinerary[i];
+                    let end = fullItinerary[i+1];
 
                     if (start === end) {
                         segments.push({ from: start, to: end, distance_km: 0 });
@@ -402,10 +394,14 @@ const resolvers = {
                     }
 
                     const res = await session.run(`
-                        MATCH (z1:HydroplaneZone {zone_code: $start})
-                        MATCH (z2:HydroplaneZone {zone_code: $end})
-                        RETURN point.distance(z1.location, z2.location) / 1000 as distKm
-                    `, { start, end });
+                MATCH (z1:HydroplaneZone {zone_code: $start})
+                MATCH (z2:HydroplaneZone {zone_code: $end})
+                RETURN point.distance(z1.location, z2.location) / 1000 as distKm
+            `, { start, end });
+
+                    if (res.records.length === 0) {
+                        console.warn(`Attention: Impossible de calculer la distance entre ${start} et ${end}. Vérifiez que ces codes existent exactement dans Neo4j.`);
+                    }
 
                     const record = res.records[0];
                     const dist = record ? (record.get('distKm') || 0) : 0;
@@ -429,7 +425,14 @@ const resolvers = {
                 let globalWarning = null;
 
                 for (const zoneCode of targetZoneCodes) {
-                    const availableLockers = await Locker.countDocuments({ is_empty: true });
+                    const availableLockers = await Locker.countDocuments({
+                        $or: [
+                            { port_id: zoneCode },
+                            { port_ref: zoneCode }
+                        ],
+                        is_empty: true
+                    });
+
                     const isPartial = availableLockers < totalCratesNeeded;
 
                     if (isPartial) {
@@ -445,7 +448,6 @@ const resolvers = {
                 }
 
                 const fuelNeeded = totalDistance * AVG_FUEL_CONSUMPTION_L_KM;
-
                 const isFeasible = (fuelNeeded <= planeProps.fuel) && (totalCratesNeeded <= planeCapacity);
 
                 return {
