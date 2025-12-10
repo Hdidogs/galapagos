@@ -182,7 +182,6 @@ const typeDefs = `
     locateSeaplanes(atTime: String): [SeaplaneStatus],
     optimizeDelivery(
         seaplaneId: String!, 
-        warehouseZoneCode: String!, 
         clientIds: [Int]! 
     ): RoutePlan
   }
@@ -342,10 +341,29 @@ const resolvers = {
             }
         },
 
-        optimizeDelivery: async (_, { seaplaneId, warehouseZoneCode, clientIds }) => {
+        optimizeDelivery: async (_, { seaplaneId, clientIds }) => {
             const session = driver.session();
 
             try {
+                const planeRes = await session.run(
+                    `MATCH (s:Seaplane {id: $id}) RETURN s`,
+                    { id: seaplaneId }
+                );
+
+                if (planeRes.records.length === 0) throw new Error(`Avion ${seaplaneId} inconnu`);
+
+                const planeNode = planeRes.records[0].get('s').properties;
+                const planeCapacityRaw = planeNode.capacity || 100;
+                const planeCapacity = neo4j.isInt(planeCapacityRaw) ? planeCapacityRaw.toNumber() : planeCapacityRaw;
+
+                const originLocation = planeNode.location;
+
+                if (!originLocation) {
+                    throw new Error("L'hydravion n'a pas de coordonnées GPS (propriété location manquante)");
+                }
+
+                let currentLocation = originLocation;
+
                 const clients = await Client.find({ client_id: { $in: clientIds } });
                 const targetZoneCodes = [...new Set(
                     clients
@@ -353,17 +371,7 @@ const resolvers = {
                         .filter(port => port && typeof port === 'string')
                 )];
 
-                console.log("Zones à visiter (Codes):", targetZoneCodes);
-
-                if (targetZoneCodes.length === 0) {
-                    console.warn("Aucun code zone valide trouvé pour les clients sélectionnés.");
-                }
-
-                const orders = await Order.find({
-                    client_id: { $in: clientIds },
-                    status: "pending"
-                });
-
+                const orders = await Order.find({ client_id: { $in: clientIds }, status: "pending" });
                 let totalCratesNeeded = 0;
                 const allProducts = await Product.find();
                 const productCratesMap = {};
@@ -376,65 +384,64 @@ const resolvers = {
                     });
                 });
 
-                const fullItinerary = [warehouseZoneCode, ...targetZoneCodes, warehouseZoneCode];
-
-                console.log("Itinéraire complet:", fullItinerary);
-
                 let totalDistance = 0;
                 const segments = [];
+                let currentLabel = `Départ (${seaplaneId})`;
 
-                for (let i = 0; i < fullItinerary.length - 1; i++) {
-                    let start = fullItinerary[i];
-                    let end = fullItinerary[i+1];
-
-                    if (start === end) {
-                        segments.push({ from: start, to: end, distance_km: 0 });
-                        continue;
-                    }
-
+                for (const targetCode of targetZoneCodes) {
                     const res = await session.run(`
-                MATCH (z1:HydroplaneZone {zone_code: $start})
-                MATCH (z2:HydroplaneZone {zone_code: $end})
-                RETURN point.distance(z1.location, z2.location) / 1000 as distKm
-            `, { start, end });
+                MATCH (target:HydroplaneZone {zone_code: $targetCode})
+                RETURN 
+                    target.location as targetPoint,
+                    point.distance($currentLoc, target.location) / 1000 as distKm
+            `, {
+                        targetCode: targetCode,
+                        currentLoc: currentLocation
+                    });
 
-                    if (res.records.length === 0) {
-                        console.warn(`Attention: Impossible de calculer la distance entre ${start} et ${end}. Vérifiez que ces codes existent exactement dans Neo4j.`);
-                    }
+                    if (res.records.length === 0) continue;
 
                     const record = res.records[0];
-                    const dist = record ? (record.get('distKm') || 0) : 0;
+                    const dist = record.get('distKm') || 0;
+                    const nextPoint = record.get('targetPoint');
 
-                    totalDistance += dist;
                     segments.push({
-                        from: start,
-                        to: end,
+                        from: currentLabel,
+                        to: targetCode,
                         distance_km: Math.round(dist * 100) / 100
                     });
+
+                    totalDistance += dist;
+                    currentLocation = nextPoint;
+                    currentLabel = targetCode;
                 }
 
-                const planeRes = await session.run(`MATCH (s:Seaplane {id: $id}) RETURN s`, { id: seaplaneId });
-                if (planeRes.records.length === 0) throw new Error(`Avion ${seaplaneId} inconnu`);
+                const returnRes = await session.run(`
+            RETURN point.distance($currentLoc, $originLoc) / 1000 as distKm
+        `, {
+                    currentLoc: currentLocation,
+                    originLoc: originLocation
+                });
 
-                const planeProps = planeRes.records[0].get('s').properties;
-                const capacityRaw = planeProps.capacity || 100;
-                const planeCapacity = neo4j.isInt(capacityRaw) ? capacityRaw.toNumber() : capacityRaw;
+                const returnDist = returnRes.records[0].get('distKm') || 0;
+                totalDistance += returnDist;
+
+                segments.push({
+                    from: currentLabel,
+                    to: `Retour Départ (${seaplaneId})`,
+                    distance_km: Math.round(returnDist * 100) / 100
+                });
 
                 const stopsStatus = [];
                 let globalWarning = null;
 
                 for (const zoneCode of targetZoneCodes) {
                     const availableLockers = await Locker.countDocuments({
-                        $or: [
-                            { port_id: zoneCode },
-                            { port_ref: zoneCode }
-                        ],
+                        $or: [{ port_id: zoneCode }, { port_ref: zoneCode }],
                         is_empty: true
                     });
 
-                    const isPartial = availableLockers < totalCratesNeeded;
-
-                    if (isPartial) {
+                    if (availableLockers < totalCratesNeeded) {
                         globalWarning = "ATTENTION : Capacité lockers insuffisante. Livraison partielle requise.";
                     }
 
@@ -442,13 +449,11 @@ const resolvers = {
                         zone_code: zoneCode,
                         has_empty_lockers: availableLockers > 0,
                         available_lockers_count: availableLockers,
-                        crates_to_deliver: totalCratesNeeded
                     });
-
                 }
 
                 const fuelNeeded = totalDistance * AVG_FUEL_CONSUMPTION_L_KM;
-                const isFeasible = (fuelNeeded <= planeProps.fuel) && (totalCratesNeeded <= planeCapacity);
+                const isFeasible = (fuelNeeded <= planeNode.fuel) && (totalCratesNeeded <= planeCapacity);
 
                 return {
                     total_distance_km: Math.round(totalDistance * 100) / 100,
@@ -460,7 +465,7 @@ const resolvers = {
                 };
 
             } catch (error) {
-                console.error("Erreur optimisation:", error);
+                console.error(error);
                 throw error;
             } finally {
                 await session.close();

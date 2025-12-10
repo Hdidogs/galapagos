@@ -27,17 +27,6 @@
                 <div class="min-h-screen" style="background-color: var(--color-bg-primary);">
                     <!-- Header -->
                     <header class="border-b" style="border-color: var(--color-border); background-color: var(--color-bg-secondary);">
-                        <div class="px-6 py-4">
-                            <div class="flex items-center gap-3 mb-6">
-                                <div class="w-10 h-10 rounded-lg" style="background: linear-gradient(135deg, #0ea5e9, #10b981); display: flex; align-items: center; justify-content: center;">
-                                    <span class="text-white font-bold text-lg">ALK</span>
-                                </div>
-                                <div>
-                                    <h1 class="text-2xl font-bold" style="color: var(--color-text-secondary);">Logistique d'Archipel - Galapagos</h1>
-                                </div>
-                            </div>
-                        </div>
-
                         <!-- Tabs -->
                         <div class="flex border-t" style="border-color: var(--color-border);">
                             <button
@@ -306,14 +295,14 @@
                 }
             };
 
-            // Optimize Route
             const optimizeRoute = async () => {
                 if (!planner.selectedSeaplane || planner.selectedClients.length === 0) return;
 
                 planner.loading = true;
+
                 const query = `
-                        query Optimize($avion: String!, $base: String!, $clients: [Int]!) {
-                            optimizeDelivery(seaplaneId: $avion, warehouseZoneCode: $base, clientIds: $clients) {
+                        query Optimize($avion: String!, $clients: [Int]!) {
+                            optimizeDelivery(seaplaneId: $avion, clientIds: $clients) {
                                 total_distance_km
                                 estimated_fuel_needed
                                 is_feasible
@@ -325,7 +314,7 @@
 
                 const variables = {
                     avion: planner.selectedSeaplane,
-                    base: "ZONE_SCZ_TC",
+                    // Suppression de 'base' ici aussi car l'API calcule le départ automatiquement
                     clients: planner.selectedClients.map(id => parseInt(id))
                 };
 
