@@ -96,6 +96,7 @@ const typeDefs = `
   type Seaplane {
     id: ID!
     model: String
+    location: Point
     status: String
     fuel: Float
     capacity: Int
@@ -104,8 +105,7 @@ const typeDefs = `
   type SeaplaneStatus {
     id: ID!
     status: String
-    lat: Float
-    lon: Float
+      location: Point
     fuel_level: Float
     timestamp: String
   }
@@ -332,8 +332,7 @@ const resolvers = {
                             id: props.id,
                             status: props.status,
                             fuel_level: props.fuel,
-                            lat: null,
-                            lon: null,
+                            location: formatPoint(props.location),
                             timestamp: new Date().toISOString()
                         };
                     });
