@@ -513,7 +513,7 @@
 
                 const variables = {
                     avion: planner.selectedSeaplane,
-                    base: formData.clients.get(0)?.home_port || '',
+                    base: "ZONE_SCZ_TC",
                     clients: planner.selectedClients.map(id => parseInt(id))
                 };
 
