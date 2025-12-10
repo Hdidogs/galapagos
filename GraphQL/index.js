@@ -445,6 +445,7 @@ const resolvers = {
                         available_lockers_count: availableLockers,
                         crates_to_deliver: totalCratesNeeded
                     });
+
                 }
 
                 const fuelNeeded = totalDistance * AVG_FUEL_CONSUMPTION_L_KM;
