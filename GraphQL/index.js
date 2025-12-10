@@ -8,6 +8,7 @@ const MONGODB_URI = "mongodb+srv://hdi:test@cluster0.bjbokej.mongodb.net";
 const NEO4J_URI = "neo4j://localhost:7687";
 const driver = neo4j.driver(NEO4J_URI, neo4j.auth.basic('neo4j', 'password'));
 const AVG_FUEL_CONSUMPTION_L_KM = 0.02;
+
 /**
  *
  *  Schema & model MongoDb Table
@@ -50,7 +51,7 @@ export const Order = mongoose.model('Order', orderSchema, 'orders');
 
 const lockerSchema = new Schema({
     locker_id: { type: Number, required: true, unique: true },
-    port_id: Number,
+    port_id: String,
     is_empty: Boolean,
     occupied_by_order_id: Number
 });
@@ -96,7 +97,6 @@ const typeDefs = `
     id: ID!
     model: String
     status: String
-    location: Point
     fuel: Float
     capacity: Int
   }
@@ -104,7 +104,8 @@ const typeDefs = `
   type SeaplaneStatus {
     id: ID!
     status: String
-    location: Point
+    lat: Float
+    lon: Float
     fuel_level: Float
     timestamp: String
   }
@@ -331,7 +332,8 @@ const resolvers = {
                             id: props.id,
                             status: props.status,
                             fuel_level: props.fuel,
-                            location: formatPoint(props.location),
+                            lat: null,
+                            lon: null,
                             timestamp: new Date().toISOString()
                         };
                     });
@@ -346,186 +348,124 @@ const resolvers = {
 
             try {
                 const clients = await Client.find({ client_id: { $in: clientIds } });
-                const portRefs = [...new Set(clients.map(c => c.home_port))];
+                const targetZoneCodes = [...new Set(
+                    clients
+                        .map(c => c.home_port)
+                        .filter(port => port && typeof port === 'string')
+                )];
 
-                const idPorts = portRefs.filter(p => !p.startsWith("ZONE"));
-                const zonePorts = portRefs.filter(p => p.startsWith("ZONE"));
-                let convertedPorts = [];
+                console.log("Zones à visiter (Codes):", targetZoneCodes);
 
-                if (idPorts.length > 0) {
-                    const res = await session.run(
-                        `
-                MATCH (z:HydroplaneZone)
-                WHERE elementId(z) IN $ids
-                RETURN elementId(z) AS id, z.zone_code AS code
-                `,
-                        { ids: idPorts }
-                    );
-
-                    const mapRes = Object.fromEntries(res.records.map(r => [
-                        r.get("id"),
-                        r.get("code")
-                    ]));
-
-                    convertedPorts = idPorts
-                        .map(id => mapRes[id])
-                        .filter(code => code);
+                if (targetZoneCodes.length === 0) {
+                    console.warn("Aucun code zone valide trouvé pour les clients sélectionnés.");
                 }
 
-                const targetZoneCodes = [...zonePorts, ...convertedPorts];
-
-                if (targetZoneCodes.length === 0 && clientIds.length > 0) {
-                    throw new Error("Aucun port valide trouvé pour les clients sélectionnés.");
-                }
                 const orders = await Order.find({
                     client_id: { $in: clientIds },
                     status: "pending"
                 });
 
-                const products = await Product.find();
-                const cratesMap = {};
-                for (const p of products) cratesMap[p.product_id] = p.crates_per_unit || 1;
-
-                const cratesPerZone = {};
                 let totalCratesNeeded = 0;
+                const allProducts = await Product.find();
+                const productCratesMap = {};
+                allProducts.forEach(p => productCratesMap[p.product_id] = p.crates_per_unit || 1);
 
-                for (const order of orders) {
-                    const client = clients.find(c => c.client_id === order.client_id);
-                    const zone = client.home_port.startsWith("ZONE")
-                        ? client.home_port
-                        : convertedPorts[portRefs.indexOf(client.home_port)];
-
-                    if (!zone) continue;
-
-                    for (const item of order.items) {
-                        const crates = (cratesMap[item.product_id] || 1) * item.qty;
-                        cratesPerZone[zone] = (cratesPerZone[zone] || 0) + crates;
-                        totalCratesNeeded += crates;
-                    }
-                }
-                const planeRes = await session.run(`
-            MATCH (s:Seaplane {id: $id})
-            RETURN s, s.location AS location
-        `, { id: seaplaneId });
-
-                if (planeRes.records.length === 0)
-                    throw new Error(`Avion ${seaplaneId} inconnu`);
-
-                const planeNode = planeRes.records[0].get("s").properties;
-                const planeLocation = planeRes.records[0].get("location");
-                const planeCapacity = neo4j.isInt(planeNode.capacity)
-                    ? planeNode.capacity.toNumber()
-                    : planeNode.capacity;
-
-                const itinerary = [
-                    { type: "point", ref: planeLocation },
-                    { type: "zone", ref: warehouseZoneCode },
-                    ...targetZoneCodes.map(z => ({ type: "zone", ref: z })),
-                    { type: "zone", ref: warehouseZoneCode },
-                    { type: "point", ref: planeLocation }
-                ];
-
-                const segments = [];
-                for (let i = 0; i < itinerary.length - 1; i++) {
-                    segments.push({
-                        start: itinerary[i],
-                        end: itinerary[i + 1]
+                orders.forEach(order => {
+                    order.items.forEach(item => {
+                        const cratesPerItem = productCratesMap[item.product_id] || 1;
+                        totalCratesNeeded += (cratesPerItem * item.qty);
                     });
-                }
+                });
 
-                const zonePairs = segments
-                    .map((s, i) => ({
-                        i,
-                        start: s.start.type === "zone" ? s.start.ref : null,
-                        end: s.end.type === "zone" ? s.end.ref : null,
-                    }))
-                    .filter(s => s.start && s.end);
+                const fullItinerary = [warehouseZoneCode, ...targetZoneCodes, warehouseZoneCode];
 
-                let zoneDistances = {};
-                if (zonePairs.length > 0) {
-                    const res = await session.run(`
-                UNWIND $pairs AS p
-                MATCH (a:HydroplaneZone {zone_code: p.start})
-                MATCH (b:HydroplaneZone {zone_code: p.end})
-                RETURN p.i AS idx,
-                       point.distance(a.location, b.location)/1000 AS dist
-            `, { pairs: zonePairs });
-
-                    zoneDistances = Object.fromEntries(
-                        res.records.map(r => [
-                            r.get("idx"),
-                            r.get("dist")
-                        ])
-                    );
-                }
-
+                console.log("Itinéraire complet:", fullItinerary);
 
                 let totalDistance = 0;
-                const finalSegments = [];
+                const segments = [];
 
-                for (let i = 0; i < segments.length; i++) {
-                    const seg = segments[i];
-                    let dist = 0;
+                for (let i = 0; i < fullItinerary.length - 1; i++) {
+                    let start = fullItinerary[i];
+                    let end = fullItinerary[i+1];
 
-                    if (seg.start.type === "zone" && seg.end.type === "zone") {
-                        dist = zoneDistances[i] || 0;
-                    } else {
-                        // POINT -> ZONE ou ZONE -> POINT
-                        const isStartPoint = seg.start.type === "point";
-                        const point = isStartPoint ? seg.start.ref : seg.end.ref;
-                        const zone = isStartPoint ? seg.end.ref : seg.start.ref;
-
-                        const res = await session.run(`
-                    MATCH (z:HydroplaneZone {zone_code: $zone})
-                    RETURN point.distance($pt, z.location)/1000 AS dist
-                `, { pt: point, zone });
-
-                        dist = res.records[0].get("dist") || 0;
+                    if (start === end) {
+                        segments.push({ from: start, to: end, distance_km: 0 });
+                        continue;
                     }
 
+                    const res = await session.run(`
+                MATCH (z1:HydroplaneZone {zone_code: $start})
+                MATCH (z2:HydroplaneZone {zone_code: $end})
+                RETURN point.distance(z1.location, z2.location) / 1000 as distKm
+            `, { start, end });
+
+                    if (res.records.length === 0) {
+                        console.warn(`Attention: Impossible de calculer la distance entre ${start} et ${end}. Vérifiez que ces codes existent exactement dans Neo4j.`);
+                    }
+
+                    const record = res.records[0];
+                    const dist = record ? (record.get('distKm') || 0) : 0;
+
                     totalDistance += dist;
-                    finalSegments.push({
-                        from: seg.start.ref,
-                        to: seg.end.ref,
+                    segments.push({
+                        from: start,
+                        to: end,
                         distance_km: Math.round(dist * 100) / 100
                     });
                 }
 
-                const availableLockers = await Locker.countDocuments({ is_empty: true });
-                const lockerWarning = availableLockers < totalCratesNeeded
-                    ? "ATTENTION : Capacité lockers insuffisante. Livraison partielle requise."
-                    : null;
+                const planeRes = await session.run(`MATCH (s:Seaplane {id: $id}) RETURN s`, { id: seaplaneId });
+                if (planeRes.records.length === 0) throw new Error(`Avion ${seaplaneId} inconnu`);
 
+                const planeProps = planeRes.records[0].get('s').properties;
+                const capacityRaw = planeProps.capacity || 100;
+                const planeCapacity = neo4j.isInt(capacityRaw) ? capacityRaw.toNumber() : capacityRaw;
+
+                const stopsStatus = [];
+                let globalWarning = null;
+
+                for (const zoneCode of targetZoneCodes) {
+                    const availableLockers = await Locker.countDocuments({
+                        $or: [
+                            { port_id: zoneCode },
+                            { port_ref: zoneCode }
+                        ],
+                        is_empty: true
+                    });
+
+                    const isPartial = availableLockers < totalCratesNeeded;
+
+                    if (isPartial) {
+                        globalWarning = "ATTENTION : Capacité lockers insuffisante. Livraison partielle requise.";
+                    }
+
+                    stopsStatus.push({
+                        zone_code: zoneCode,
+                        has_empty_lockers: availableLockers > 0,
+                        available_lockers_count: availableLockers,
+                        crates_to_deliver: totalCratesNeeded
+                    });
+                }
 
                 const fuelNeeded = totalDistance * AVG_FUEL_CONSUMPTION_L_KM;
-                const isFeasible =
-                    fuelNeeded <= planeNode.fuel &&
-                    totalCratesNeeded <= planeCapacity;
-
-                const stopsStatus = targetZoneCodes.map(z => ({
-                    zone_code: z,
-                    crates_to_deliver: cratesPerZone[z] || 0,
-                    has_empty_lockers: availableLockers > 0,
-                    available_lockers_count: availableLockers
-                }));
+                const isFeasible = (fuelNeeded <= planeProps.fuel) && (totalCratesNeeded <= planeCapacity);
 
                 return {
                     total_distance_km: Math.round(totalDistance * 100) / 100,
                     estimated_fuel_needed: Math.round(fuelNeeded * 100) / 100,
                     is_feasible: isFeasible,
-                    segments: finalSegments,
+                    segments,
                     stops_status: stopsStatus,
-                    warning: lockerWarning
+                    warning: globalWarning
                 };
 
-            } catch (err) {
-                console.error("Erreur optimisation:", err);
-                throw err;
+            } catch (error) {
+                console.error("Erreur optimisation:", error);
+                throw error;
             } finally {
                 await session.close();
             }
         },
-
     },
 };
 
