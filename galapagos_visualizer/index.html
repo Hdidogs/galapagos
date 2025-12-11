@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Logistique d'Archipel</title>
+    <link rel="icon" type="image/x-icon" href="icon.jpg">
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -99,7 +100,7 @@
                                 </td>
                                 <td class="py-3 px-4 text-right">
                                   <div class="flex items-center justify-end gap-2">
-                                    <span>{{ plane.fuel }} L</span>
+                                    <span>{{ plane.fuel_level }} L</span>
                                     <div class="w-16 h-2 bg-gray-700 rounded-full overflow-hidden">
                                       <div class="h-full bg-blue-500" :style="{ width: Math.min(plane.fuel, 100) + '%' }"></div>
                                     </div>
@@ -279,7 +280,7 @@
 
             const graphqlQuery = async (query, variables = {}) => {
                 try {
-                    const response = await fetch(`${API_URL}/`, { // CORRECTION: Root endpoint
+                    const response = await fetch(`${API_URL}/`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -318,7 +319,6 @@
                 }
             };
 
-            // Load Form Data
             const loadFormData = async () => {
                 const query = `
                         query InitForm {
@@ -356,7 +356,6 @@
 
                 const variables = {
                     avion: planner.selectedSeaplane,
-                    // Suppression de 'base' ici aussi car l'API calcule le départ automatiquement
                     clients: planner.selectedClients.map(id => parseInt(id))
                 };
 
@@ -368,7 +367,6 @@
                 planner.loading = false;
             };
 
-            // Initialize Map
             const initializeMap = () => {
                 if (map.value) {
                     map.value.remove();
@@ -381,7 +379,6 @@
                     maxZoom: 19
                 }).addTo(map.value);
 
-                // Add island markers
                 mapData.islands.forEach(island => {
                     if(island.location) {
                         L.circleMarker([island.location.lat, island.location.lon], {
@@ -395,7 +392,6 @@
                     }
                 });
 
-                // Add seaplane markers
                 mapData.seaplanes.forEach(plane => {
                     if(plane.location) {
                         L.circleMarker([plane.location.lat, plane.location.lon], {
@@ -410,24 +406,20 @@
                 });
             };
 
-            // Draw route polyline on map
             const drawRouteOnMap = () => {
                 if (!map.value || !planner.results || !planner.results.segments) return;
-                // Note: Drawing actual routes would require resolving client/island locations
             };
 
-            // Watch map data changes
             watch(() => mapData.islands.length, () => {
                 if (activeTab.value === 'map' && mapData.islands.length > 0) {
                     initializeMap();
                 }
             });
 
-            // Initialize on mount
             onMounted(async () => {
                 await loadMapData();
                 await loadFormData();
-                setTimeout(initializeMap, 100); // Small delay to ensure DOM is ready
+                setTimeout(initializeMap, 100);
             });
 
             return {
